@@ -245,7 +245,7 @@ class TranslatorEngine:
             try:
                 if base_delay > 0:
                     time.sleep(base_delay)
-                res = translator.translate(masked)
+                res = translator.translate(masked, target_lang=tgt_code)
                 if res and "Error 500" not in res:
                     unmasked = self.unmask_and_repair(res, phs)
                     final_text = self.apply_glossary(unmasked, tgt_code)

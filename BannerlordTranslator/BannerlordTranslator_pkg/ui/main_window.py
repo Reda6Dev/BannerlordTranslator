@@ -7,7 +7,10 @@ ui/main_window.py — النافذة الرئيسية (واجهة Tkinter فقط
 إشارات المحرك (on_progress/on_log/on_finish/on_error) لتحديثات فعلية
 بالشاشة عبر root.after() (عشان يضل التحديث Thread-safe).
 """
+import json
+import locale
 import os
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -70,16 +73,31 @@ class BannerlordTranslatorV12:
 
         self.build_gui()
 
+    def load_config_settings(self):
+        if not os.path.exists(CONFIG_FILE):
+            return {}
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            return loaded if isinstance(loaded, dict) else {}
+        except Exception as e:
+            write_log_line("WARN", f"Failed to read config.json: {e}")
+            return {}
+
+    def save_config_settings(self, **updates):
+        cfg = self.load_config_settings()
+        cfg.update(updates)
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            write_log_line("WARN", f"Failed to save config.json: {e}")
+
     def detect_initial_language(self):
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                    saved = cfg.get("ui_language")
-                    if saved in OFFICIAL_LANGUAGES:
-                        return saved
-            except Exception as e:
-                write_log_line("WARN", f"Failed to read config.json: {e}")
+        cfg = self.load_config_settings()
+        saved = cfg.get("ui_language")
+        if saved in OFFICIAL_LANGUAGES:
+            return saved
         try:
             sys_locale = locale.getdefaultlocale()[0]
             if sys_locale:
@@ -89,12 +107,39 @@ class BannerlordTranslatorV12:
         except Exception as e:
             write_log_line("WARN", f"Failed to detect system locale: {e}")
         return "ar"
+
     def save_language_preference(self, lang_code):
+        self.save_config_settings(ui_language=lang_code)
+
+    def get_saved_engine_index(self):
+        cfg = self.load_config_settings()
         try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump({"ui_language": lang_code}, f)
-        except Exception as e:
-            write_log_line("WARN", f"Failed to save config.json: {e}")
+            saved_index = int(cfg.get("selected_engine", 0))
+        except (TypeError, ValueError):
+            saved_index = 0
+        engines = [self.t("eng_google"), self.t("eng_deepl")]
+        return saved_index if 0 <= saved_index < len(engines) else 0
+
+    def restore_saved_engine_state(self):
+        cfg = self.load_config_settings()
+        saved_index = self.get_saved_engine_index()
+        engines = [self.t("eng_google"), self.t("eng_deepl")]
+        self.engine_cb.set(engines[saved_index])
+        self.save_config_settings(selected_engine=saved_index)
+
+        saved_key = str(cfg.get("deepl_api_key", "")).strip()
+        self.api_key_entry.config(state="normal")
+        self.api_key_entry.delete(0, tk.END)
+        if saved_key:
+            self.api_key_entry.insert(0, saved_key)
+
+        if saved_index == 1:
+            self.api_key_entry.config(state="normal")
+            self.api_key_lbl.config(fg="#000000")
+        else:
+            self.api_key_entry.config(state="disabled")
+            self.api_key_lbl.config(fg="#888888")
+
     def execute_batch(self, selected_mods):
         if not selected_mods:
             return
@@ -122,6 +167,8 @@ class BannerlordTranslatorV12:
 
         engine_index = self.engine_cb.current()
         api_key = self.api_key_entry.get().strip() if engine_index == 1 else None
+        if engine_index == 1:
+            self.save_config_settings(deepl_api_key=api_key or "")
 
         self.engine.configure(
             delay=self.delay_var.get(),
@@ -290,7 +337,6 @@ class BannerlordTranslatorV12:
 
         self.engine_cb = ttk.Combobox(self.opt_frame, state="readonly", font=self.font_main, width=26)
         self.update_engine_combobox_values()
-        self.engine_cb.current(0)
         self.engine_cb.grid(row=1, column=1, padx=4, pady=4)
         self.engine_cb.bind("<<ComboboxSelected>>", self.on_engine_change)
         ToolTip(self.engine_cb, lambda: self.t("tip_engine"))
@@ -300,6 +346,7 @@ class BannerlordTranslatorV12:
 
         self.api_key_entry = tk.Entry(self.opt_frame, font=self.font_main, width=24, state="disabled")
         self.api_key_entry.grid(row=1, column=3, padx=4, pady=4)
+        self.restore_saved_engine_state()
         ToolTip(self.api_key_entry, lambda: self.t("tip_key"))
 
         delay_f = tk.Frame(self.opt_frame)
@@ -477,9 +524,14 @@ class BannerlordTranslatorV12:
         self.edit_btn.config(text=self.t("edit_btn"))
     def on_engine_change(self, event=None):
         idx = self.engine_cb.current()
+        self.save_config_settings(selected_engine=idx)
+
         if idx == 1:
             self.api_key_lbl.config(fg="#000000")
             self.api_key_entry.config(state="normal")
+            api_key = self.api_key_entry.get().strip()
+            if api_key:
+                self.save_config_settings(deepl_api_key=api_key)
         else:
             self.api_key_lbl.config(fg="#888888")
             self.api_key_entry.config(state="disabled")

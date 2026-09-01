@@ -1,5 +1,14 @@
+# ملفات الإعدادات والبيانات الحساسة
+config.json
+glossary.json
+translation_memory.json
+
+# ملفات السجلات والبيئات الوهمية
+logs/
+*.log
 venv/
 __pycache__/
+# ملفات بناء التطبيق (PyInstaller)
 build/
 dist/
-main.spec
+*.spec
